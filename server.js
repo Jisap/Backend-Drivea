@@ -18,6 +18,13 @@ app.use(express.json({ limit: "100mb" }));
 
 //Root API
 app.get("/", (_req, res) => res.send("Server is running"))
+
+//Error handling middleware
+app.use((err, _req, res, _next) => {
+    res.status(err.status || 500).json({ error: err.message || "Something went wrong!" })
+})
+
+//Start server
 const port = process.env.PORT || 3000;
 app.listen(port, () => {
     console.log(`Server running at http://localhost:${port}`)
