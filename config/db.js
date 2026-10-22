@@ -72,6 +72,7 @@ export async function initDB() {
         ]
         )
     } catch (error) {
-        console.error("Error initializin database:", error)
+        console.error("Error initializin database:", error);
+        throw error;
     }
 }

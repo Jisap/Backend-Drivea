@@ -2,6 +2,7 @@ import express from "express";
 import "dotenv/config";
 import cors from "cors"
 import cookieParser from "cookie-parser"
+import { initDB } from "./config/db.js";
 
 const app = express();
 
@@ -26,6 +27,13 @@ app.use((err, _req, res, _next) => {
 
 //Start server
 const port = process.env.PORT || 3000;
-app.listen(port, () => {
-    console.log(`Server running at http://localhost:${port}`)
+
+//Initialize DB connection them start server
+initDB().then(() => {
+    app.listen(port, () => {
+        console.log(`Server running at http://localhost:${port}`)
+    })
+}).catch((err) => {
+    console.error("Failed to start server", err);
+    process.exit(1);
 })
