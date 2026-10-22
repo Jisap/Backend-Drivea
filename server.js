@@ -28,7 +28,7 @@ app.use((err, _req, res, _next) => {
 //Start server
 const port = process.env.PORT || 3000;
 
-//Initialize DB connection them start server
+//Initialize DB connection then start server
 initDB().then(() => {
     app.listen(port, () => {
         console.log(`Server running at http://localhost:${port}`)
