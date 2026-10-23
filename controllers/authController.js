@@ -106,5 +106,10 @@ export const logoutUser = async (_req, res) => {
 //Get current user profile
 // GET /api/auth/me
 export const getMe = async (req, res) => {
-
+  try {
+    // req.user is already loader by protect middleware
+    return res.status(200).json({ user: req.user })
+  } catch (error) {
+    return res.status(500).json({ error: error.message })
+  }
 }
