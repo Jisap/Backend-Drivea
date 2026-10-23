@@ -1,10 +1,28 @@
 import { sql } from "../config/db.js"
+import jwt from "jsonwebtoken"
+
 import bcrypt from "bcrypt"
 
 
 // Generates JWT access token and attaches it to response as HTTP-Only Cookie
-export const sendTokenResponse = () => {
+export const sendTokenResponse = (
+  res,
+  userId,
+  statusCode = 200,
+  extraData = {}
+) => {
+  const token = jwt.sign({ id: userId }, process.env.JWT_SECRET, { expiresIn: "7d" })
 
+  const isProduction = process.env.NODE_ENV === 'production'
+
+  res.cookie("token", token, {
+    httpOnly: true,
+    secure: isProduction,
+    sameSite: isProduction ? "none" : "lax",
+    maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days in miliseconds
+  })
+
+  res.status(statusCode).json({ token, ...extraData })
 }
 
 // Register new user
@@ -30,8 +48,11 @@ export const registerUser = async (req, res) => {
     const storageLimit = Number(process.env.MAX_STORAGE_PER_USER) || 1073741824 //1GB
 
     const [user] = await sql`INSERT INTO users (name, email, password, storage_limit) VALUES (${name.trim()}, ${normalizedEmail}, ${hashedPassword}, ${storageLimit}) RETURNING id, name, email, storage_limit, created_at, updated_at`
-  } catch (error) {
 
+    sendTokenResponse(res, user.id, 201, { user });
+  } catch (error) {
+    console.error("[registerUser] Error:", error);
+    res.status(500).json({ error: "Failed to register user" });
   }
 }
 
