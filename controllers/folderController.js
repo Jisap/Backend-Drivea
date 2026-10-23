@@ -1,13 +1,57 @@
 
 
+import { sql } from "../config/db.js";
+
 // Create new folder
 // POST /api/folders
 export const createFolder = async (req, res) => {
-    try {
-        const { name, parent_id } = req.body
-    } catch (error) {
+  try {
+    const { name, parent, parent_id } = req.body;
+    const targetParent = parent_id ?? parent;
 
+    if (!name.trim()) {
+      return res.status(400).json({ error: "Folder name is required." })
     }
+
+    let folderPath = [];
+    if (targetParent) {
+      const [parentFolder] = await sql`
+            SELECT id, path FROM folders
+            WHERE id = ${targetParent} AND owner_id = ${req.user.id} AND is_trashed = false`
+
+      if (!parentFolder) {
+        return res.status(404).json({ error: "Parent folder not found" });
+      }
+
+      folderPath = [...(parentFolder.path || []), parentFolder.id];
+    }
+
+    // Check duplicate folder in same directory
+    const [existing] = await sql`
+      SELECT id FROM folders
+      WHERE name = ${name.trim()} 
+      AND parent_id IS NOT DISTINCT FROM ${targetParent || null}
+      AND owner_id = ${req.user.id}
+      AND is_trashed = false 
+    `
+    if (existing) {
+      return res.status(400).json({ error: "A Folder with this name already exists here." });
+    }
+
+    // Insert new folder
+    const [folder] = await sql`
+      INSERT INTO folders (name, parent_id, owner_id, path)
+      VALUES (${name.trim()}, ${targetParent || null}, ${req.user.id}, ${folderPath})
+      RETURNING *
+    `
+
+    return res.status(201).json({
+      folder
+    })
+
+  } catch (error) {
+    return res.status(500).json({ error: error.message })
+  }
 }
 
 // Get subfolders in a folder
