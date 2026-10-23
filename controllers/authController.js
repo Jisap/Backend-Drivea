@@ -77,7 +77,7 @@ export const loginUser = async (req, res) => {
       return res.status(401).json({ error: 'Invalid credentials' })
     }
 
-    delete user.password
+    delete user.password // Borrado para evitar exponer datos sensibles
 
     return sendTokenResponse(res, user.id, 200, { user });
   } catch (error) {
@@ -88,8 +88,19 @@ export const loginUser = async (req, res) => {
 
 //Logout user & clear cookie
 // POST /api/auth/logout
-export const logoutUser = async (req, res) => {
+export const logoutUser = async (_req, res) => {
+  try {
+    const isProduction = process.env.NODE_ENV === "production"
+    res.clearCookie("token", {
+      httpOnly: true,
+      secure: isProduction,
+      sameSite: isProduction ? "none" : "lax",
+    })
 
+    return res.status(200).json({ message: "Logged out successfully" })
+  } catch (error) {
+    return res.status(500).json({ error: error.message })
+  }
 }
 
 //Get current user profile
