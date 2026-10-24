@@ -32,6 +32,11 @@ export const createFolder = async (req, res) => {
       }
 
       // Construye la ruta materializada: hereda la ruta del padre y añade su ID
+      // EJEMPLO DE RUTA:
+      // - Si creamos "Proyectos" dentro de "Trabajo" (id: 'uuid-1'):
+      //   parentFolder.path = []  --> folderPath resultante = ['uuid-1']
+      // - Si creamos "2024" dentro de "Proyectos" (id: 'uuid-2'):
+      //   parentFolder.path = ['uuid-1'] --> folderPath resultante = ['uuid-1', 'uuid-2']
       folderPath = [...(parentFolder.path || []), parentFolder.id];
     }
 
