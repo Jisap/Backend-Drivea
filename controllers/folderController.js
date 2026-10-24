@@ -88,6 +88,7 @@ export const getFolders = async (req, res) => {
 // GET /api/folders/:id
 export const getFolderDetails = async (req, res) => {
   try {
+    // 1. Obtener los datos de la carpeta solicitada
     const [folder] = await sql`
       SELECT * FROM folders                                             -- Seleccionamos todas las columnas de la tabla folders
       WHERE id = ${req.params.id}                                       -- donde el id sea igual al id proporcionado
@@ -99,7 +100,9 @@ export const getFolderDetails = async (req, res) => {
       return res.status(404).json({ error: "Folder not found." })
     }
 
-    // Fetch ancestor names in one query (path is UUID[])
+    // 2. Obtener los nombres de los ancestros en una sola consulta
+    // EJEMPLO: Si la carpeta actual es "2024" (id: 'uuid-3')
+    // folder.path en la BD sería: ['uuid-1', 'uuid-2'] 
     const ancestorIds = folder.path || [];                              // Extrae la ruta del folder (si no tiene ruta, asigna un array vacío)
     const ancestors = ancestorIds.length > 0                            // Si el array de IDs tiene más de 0 elementos, realiza la consulta
       ? await sql`
@@ -107,8 +110,17 @@ export const getFolderDetails = async (req, res) => {
         WHERE id = ANY(${ancestorIds}::uuid[])                          -- donde el id sea igual a cualquier elemento del array
     `: []
 
-    // Preserve path order
+    // 3. Reconstruir el orden jerárquico del breadcrumb (miga de pan)
+    // ancestorMap busca en O(1) para no depender del orden desordenado que devuelva SQL
     const ancestorMap = new Map(ancestors.map((a) => [a.id, a.name]))
+
+    // EJEMPLO DE SALIDA FINAL (breadcrumbs):
+    // [
+    //   { id: null, name: "My Drive" },
+    //   { id: 'uuid-1', name: "Trabajo" },      // Extraído de ancestorMap
+    //   { id: 'uuid-2', name: "Proyectos" },    // Extraído de ancestorMap
+    //   { id: 'uuid-3', name: "2024" }          // La carpeta actual (folder)
+    // ]
     const breadcrumbs = [
       { id: null, name: "My Drive" },
       ...ancestorIds.mao((aid) => ({ id: aid, name: ancestorMap.get(aid) ?? "" })),
