@@ -141,7 +141,61 @@ export const getFolderDetails = async (req, res) => {
 // Rename folder
 // PATCH /api/folders/:id/rename
 export const renameFolder = async (req, res) => {
+  try {
+    const { name } = req.body;
+    // 1. Validación básica: evitar nombres vacíos o solo con espacios
+    if (!name.trim()) {
+      return res.status(400).json({ error: "Folder name is required." })
+    }
 
+    // 2. Obtener el parent_id actual y verificar propiedad/estado
+    // Necesitamos el parent_id para asegurar que el nuevo nombre no colisione 
+    // con otra carpeta en el mismo directorio.
+    const [currentFolder] = await sql`
+      SELECT id, parent_id FROM folders 
+      WHERE id = ${req.params.id} 
+        AND owner_id = ${req.user.id} 
+        AND is_trashed = false
+    `;
+
+    if (!currentFolder) {
+      return res.status(404).json({ error: "Folder not found." });
+    }
+
+    // 3. Verificación de duplicados con el NUEVO nombre en el mismo nivel jerárquico
+    // EJEMPLO: Si currentFolder.parent_id es NULL (está en la raíz), 
+    // buscamos si ya existe otra carpeta en la raíz con el nuevo nombre.
+    // Nota: Añadimos "AND id != ${req.params.id}" para no chocar consigo misma.
+    const [duplicate] = await sql`
+      SELECT id FROM folders 
+      WHERE name = ${name.trim()} 
+        AND parent_id IS NOT DISTINCT FROM ${currentFolder.parent_id || null}
+        AND owner_id = ${req.user.id} 
+        AND is_trashed = false 
+        AND id != ${req.params.id}
+    `;
+
+    if (duplicate) {
+      return res.status(400).json({ error: "A folder with this name already exists in this location." });
+    }
+
+    // 4. Actualización del registro
+    const [folder] = await sql`                             -- Seleccionamos el registro actualizado de la tabla folders
+      UPDATE folders                                          -- Actualizamos la tabla folders
+        SET name=${name.trim()}, updated_at=NOW()             -- Cambiamos el nombre de la carpeta y la fecha de actualización
+        WHERE  id=${req.params.id}                            -- Donde el id sea igual al id proporcionado
+          AND owner_id=${req.user.id}                           -- Y que pertenezca al usuario activo
+          AND is_trashed=false                                  -- Y que no esté en la papelera
+        RETURNING *                                           -- Devolvemos el registro completo actualizado                                                           
+    `
+
+    if (!folder) {
+      return res.status(404).json({ error: "Folder not found." })
+    }
+    return res.status(200).json({ folder })
+  } catch (error) {
+    return res.status(500).json({ error: error.message })
+  }
 }
 
 // Move folder to another directory
