@@ -202,9 +202,118 @@ export const renameFolder = async (req, res) => {
 // Move folder to another directory
 // PATCH /api/folders/:id/move
 export const moveFolder = async (req, res) => {
+  try {
+    // 1. Validaciones Previas
+    const targetParent = req.body.target_parent ?? req.body.targetParent;
+    const normalizedTargetParent = targetParent || null;
+    const folderId = req.params.id;
 
-}
+    if (normalizedTargetParent === folderId) {
+      return res.status(400).json({ error: "Cannot move a folder into itself." });
+    }
 
+    // 2. Verificar existencia y propiedad de la carpeta a mover
+    const [folder] = await sql`
+      SELECT id, name, parent_id, path FROM folders
+      WHERE id = ${folderId}
+        AND owner_id = ${req.user.id}
+        AND is_trashed = false
+    `;
+
+    if (!folder) {
+      return res.status(404).json({ error: "Folder not found." });
+    }
+
+    // Si ya está en la ubicación solicitada, no realizamos operaciones innecesarias
+    if ((folder.parent_id || null) === normalizedTargetParent) {
+      return res.status(200).json({ folder });
+    }
+
+    let newPath = [];
+    if (normalizedTargetParent) {
+      // 3. Verificar existencia y propiedad del destino
+      const [targetFolder] = await sql`
+        SELECT id, path FROM folders
+        WHERE id = ${normalizedTargetParent}
+          AND owner_id = ${req.user.id}
+          AND is_trashed = false
+      `;
+
+      if (!targetFolder) {
+        return res.status(404).json({ error: "Target folder not found." });
+      }
+
+      const targetPath = targetFolder.path || [];
+
+      // 4. Prevención de ciclos: evitar mover un padre dentro de sí mismo o sus propios hijos
+      const isDescendant = targetPath.some((id) => String(id) === String(folderId));
+      if (isDescendant) {
+        return res.status(400).json({ error: "Cannot move a folder into itself or its descendants." });
+      }
+
+      newPath = [...targetPath, targetFolder.id];
+    }
+
+    // 5. Verificación de duplicados en el destino (cubre tanto carpetas destino como la raíz)
+    const [duplicate] = await sql`
+      SELECT id FROM folders
+      WHERE name = ${folder.name}
+        AND parent_id IS NOT DISTINCT FROM ${normalizedTargetParent}
+        AND owner_id = ${req.user.id}
+        AND is_trashed = false
+        AND id != ${folderId}
+    `;
+
+    if (duplicate) {
+      return res.status(400).json({ error: "A folder with this name already exists in the target location." });
+    }
+
+    // 6. Actualizar la carpeta movida
+    const [updatedFolder] = await sql`
+      UPDATE folders
+      SET parent_id = ${normalizedTargetParent}, 
+          path = ${newPath}, 
+          updated_at = NOW()
+      WHERE id = ${folderId}
+      RETURNING *
+    `;
+
+    // 7. Actualizar las rutas de todos los descendientes
+    // EJEMPLO: Si "Trabajo" ('uuid-1') se mueve a 'uuid-3', su hijo "2024" ('uuid-2')
+    // tenía path: ['uuid-1']. Ahora debe ser: ['uuid-3', 'uuid-1'].
+    // Nota: Usamos ANY(path) en lugar de ANY(path::text[]) para respetar el tipo nativo (uuid[])
+    const descendants = await sql`
+      SELECT id, path FROM folders
+      WHERE ${folderId} = ANY(path) 
+        AND owner_id = ${req.user.id}
+    `;
+
+    if (descendants.length > 0) {
+      await Promise.all(
+        descendants.map((desc) => {
+          // Encontrar el índice donde está el folderId en el path antiguo
+          const folderIndex = desc.path.findIndex((p) => p === folderId);
+
+          // Obtener lo que viene después (los sub-niveles de este folder)
+          const subPath = folderIndex !== -1 ? desc.path.slice(folderIndex + 1) : [];
+
+          // Construir el nuevo path: [ruta del nuevo padre] + [id del folder movido] + [resto del path antiguo]
+          const updatedPath = [...newPath, folderId, ...subPath];
+
+          return sql`
+            UPDATE folders
+            SET path = ${updatedPath}, updated_at = NOW()
+            WHERE id = ${desc.id}
+          `;
+        })
+      );
+    }
+
+    return res.status(200).json({ folder: updatedFolder });
+  } catch (error) {
+    return res.status(500).json({ error: error.message });
+  }
+};
 // Soft delete folder (move to trash)
 // DELETE /api/folders/:id/trash
 export const softDeleteFolder = async (req, res) => {
