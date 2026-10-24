@@ -87,7 +87,38 @@ export const getFolders = async (req, res) => {
 // Get folder details & breadcrumb trail
 // GET /api/folders/:id
 export const getFolderDetails = async (req, res) => {
+  try {
+    const [folder] = await sql`
+      SELECT * FROM folders                                             -- Seleccionamos todas las columnas de la tabla folders
+      WHERE id = ${req.params.id}                                       -- donde el id sea igual al id proporcionado
+      AND owner_id = ${req.user.id}                                     -- y que pertenezca al usuario activo
+      AND is_trashed = false                                            -- y que no esté en la papelera
+    `
 
+    if (!folder) {
+      return res.status(404).json({ error: "Folder not found." })
+    }
+
+    // Fetch ancestor names in one query (path is UUID[])
+    const ancestorIds = folder.path || [];                              // Extrae la ruta del folder (si no tiene ruta, asigna un array vacío)
+    const ancestors = ancestorIds.length > 0                            // Si el array de IDs tiene más de 0 elementos, realiza la consulta
+      ? await sql`
+        SELECT id, name FROM folders                                    -- Seleccionamos el id y el nombre de la tabla folders
+        WHERE id = ANY(${ancestorIds}::uuid[])                          -- donde el id sea igual a cualquier elemento del array
+    `: []
+
+    // Preserve path order
+    const ancestorMap = new Map(ancestors.map((a) => [a.id, a.name]))
+    const breadcrumbs = [
+      { id: null, name: "My Drive" },
+      ...ancestorIds.mao((aid) => ({ id: aid, name: ancestorMap.get(aid) ?? "" })),
+      { id: folder.id, name: folder.name }
+    ]
+
+    return res.status(200).json({ folder, breadcrumbs })
+  } catch (error) {
+    res.status(500).json({ error: error.message })
+  }
 }
 
 // Rename folder
