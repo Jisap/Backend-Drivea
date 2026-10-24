@@ -204,12 +204,12 @@ export const renameFolder = async (req, res) => {
 export const moveFolder = async (req, res) => {
   try {
     // 1. Validaciones Previas
-    const targetParent = req.body.target_parent ?? req.body.targetParent;
-    const normalizedTargetParent = targetParent || null;
-    const folderId = req.params.id;
+    const targetParent = req.body.target_parent ?? req.body.targetParent;                     // Obtenemos el nuevo padre (aceptando ambas notaciones para compatibilidad)
+    const normalizedTargetParent = targetParent || null;                                      // Normalizamos el padre a null si es undefined o null
+    const folderId = req.params.id;                                                           // Obtenemos el id del folder a mover
 
-    if (normalizedTargetParent === folderId) {
-      return res.status(400).json({ error: "Cannot move a folder into itself." });
+    if (normalizedTargetParent === folderId) {                                                // Si el padre es el mismo folder...
+      return res.status(400).json({ error: "Cannot move a folder into itself." });            // Retornamos error
     }
 
     // 2. Verificar existencia y propiedad de la carpeta a mover
@@ -246,11 +246,14 @@ export const moveFolder = async (req, res) => {
       const targetPath = targetFolder.path || [];
 
       // 4. Prevención de ciclos: evitar mover un padre dentro de sí mismo o sus propios hijos
+      // Si la ruta del target incluye el id del folder a mover, retornamos error
       const isDescendant = targetPath.some((id) => String(id) === String(folderId));
       if (isDescendant) {
         return res.status(400).json({ error: "Cannot move a folder into itself or its descendants." });
       }
 
+      // 4.1. Construir la nueva ruta (path)
+      // Unimos la ruta del destino con el id del folder actual
       newPath = [...targetPath, targetFolder.id];
     }
 
@@ -314,6 +317,7 @@ export const moveFolder = async (req, res) => {
     return res.status(500).json({ error: error.message });
   }
 };
+
 // Soft delete folder (move to trash)
 // DELETE /api/folders/:id/trash
 export const softDeleteFolder = async (req, res) => {
