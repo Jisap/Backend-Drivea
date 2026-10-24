@@ -144,9 +144,10 @@ export const renameFolder = async (req, res) => {
   try {
     const { name } = req.body;
     // 1. Validación básica: evitar nombres vacíos o solo con espacios
-    if (!name.trim()) {
-      return res.status(400).json({ error: "Folder name is required." })
+    if (!name || typeof name !== 'string' || !name.trim()) {
+      return res.status(400).json({ error: "Folder name is required and must be a valid string." });
     }
+
 
     // 2. Obtener el parent_id actual y verificar propiedad/estado
     // Necesitamos el parent_id para asegurar que el nuevo nombre no colisione 
