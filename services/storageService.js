@@ -102,10 +102,12 @@ export const softDeleteFolderHierarchy = async (folderId, ownerId) => {
  * Restaura una carpeta y todo su contenido (subcarpetas y archivos) desde la papelera.
  *
  * Flujo:
- * 1. Obtiene toda la jerarquía de IDs (la carpeta seleccionada + todas sus subcarpetas).
- * 2. Ejecuta concurrentemente en Promise.all:
- *    - Reestablece 'is_trashed = false' y limpia 'trashed_at' para todas las carpetas del árbol.
- *    - Reestablece 'is_trashed = false' y limpia 'trashed_at' para todos los archivos dentro de esas carpetas.
+ * 1. Obtiene la información de la carpeta raíz a restaurar.
+ * 2. Comprueba el estado de su carpeta padre (parent_id):
+ *    - Si el padre no existe o sigue en la papelera, reubica esta carpeta en la raíz (parent_id = NULL, path = '{}')
+ *      y recalcula las rutas (path) de todos sus descendientes para evitar carpetas huérfanas.
+ *    - Si el padre sigue activo, preserva la estructura de rutas intacta.
+ * 3. Reestablece 'is_trashed = false' y limpia 'trashed_at' tanto en la jerarquía de carpetas como en todos sus archivos.
  *
  * @param {string} folderId - ID de la carpeta raíz a restaurar
  * @param {string} ownerId - ID del usuario propietario
