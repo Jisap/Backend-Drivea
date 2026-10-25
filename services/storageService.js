@@ -98,22 +98,96 @@ export const softDeleteFolderHierarchy = async (folderId, ownerId) => {
   ]);
 };
 
-// Restore a folder and all its contents (recursive subfolders & files)
+/**
+ * Restaura una carpeta y todo su contenido (subcarpetas y archivos) desde la papelera.
+ *
+ * Flujo:
+ * 1. Obtiene toda la jerarquía de IDs (la carpeta seleccionada + todas sus subcarpetas).
+ * 2. Ejecuta concurrentemente en Promise.all:
+ *    - Reestablece 'is_trashed = false' y limpia 'trashed_at' para todas las carpetas del árbol.
+ *    - Reestablece 'is_trashed = false' y limpia 'trashed_at' para todos los archivos dentro de esas carpetas.
+ *
+ * @param {string} folderId - ID de la carpeta raíz a restaurar
+ * @param {string} ownerId - ID del usuario propietario
+ */
 export const restoreFolderHierarchy = async (folderId, ownerId) => {
+  // 1. Obtener los datos de la carpeta que se va a restaurar
+  const [targetFolder] = await sql`
+    SELECT id, parent_id, path FROM folders
+    WHERE id = ${folderId} AND owner_id = ${ownerId}
+  `;
+
+  if (!targetFolder) return;
+
+  // 2. Verificar si el padre sigue existiendo y está activo (no en papelera)
+  let shouldMoveToRoot = false;
+  if (targetFolder.parent_id) {
+    const [parent] = await sql`
+      SELECT id, is_trashed FROM folders
+      WHERE id = ${targetFolder.parent_id} AND owner_id = ${ownerId}
+    `;
+
+    // Si el padre no existe o sigue en la papelera, movemos esta carpeta a la raíz
+    if (!parent || parent.is_trashed) {
+      shouldMoveToRoot = true;
+    }
+  }
+
+  // 3. Obtener todos los IDs de la jerarquía (folderId + subcarpetas)
   const allFolderIds = await getFolderHierarchyIds(folderId, ownerId);
 
-  await Promise.all([
-    sql`
+  // 4. Si el padre estaba en la papelera, reubicar a la raíz y actualizar las rutas de descendientes
+  if (shouldMoveToRoot) {
+    // Actualizar la carpeta principal a la raíz
+    await sql`
       UPDATE folders
-      SET is_trashed = false, trashed_at = null, updated_at = NOW()
-      WHERE id = ANY(${allFolderIds}::uuid[])
-        AND owner_id = ${ownerId}
-    `,
-    sql`
-      UPDATE files
-      SET is_trashed=false, trashed_at=NULL, updated_at=NOW()
-      WHERE folder_id = ANY(${allFolderIds}::uuid[])
-        AND owner_id = ${ownerId}
-    `,
-  ])
+      SET parent_id = NULL,
+          path = '{}',
+          is_trashed = false,
+          trashed_at = NULL,
+          updated_at = NOW()
+      WHERE id = ${folderId} AND owner_id = ${ownerId}
+    `;
+
+    // Actualizar los descendientes: remover los ancestros que estaban por encima de esta carpeta
+    const descendants = await sql`
+      SELECT id, path FROM folders
+      WHERE ${folderId} = ANY(path) AND owner_id = ${ownerId}
+    `;
+
+    if (descendants.length > 0) {
+      await Promise.all(
+        descendants.map((desc) => {
+          // El nuevo path conserva solo a partir de folderId hacia abajo
+          const folderIdx = desc.path.findIndex((p) => p === folderId);
+          const newDescPath = folderIdx !== -1 ? desc.path.slice(folderIdx) : [folderId];
+
+          return sql`
+            UPDATE folders
+            SET path = ${newDescPath},
+                is_trashed = false,
+                trashed_at = NULL,
+                updated_at = NOW()
+            WHERE id = ${desc.id}
+          `;
+        })
+      );
+    }
+  } else {
+    // Si el padre está activo, simplemente restaurar todas las carpetas conservando sus rutas
+    await sql`
+      UPDATE folders
+      SET is_trashed = false, trashed_at = NULL, updated_at = NOW()
+      WHERE id = ANY(${allFolderIds}::uuid[]) AND owner_id = ${ownerId}
+    `;
+  }
+
+  // 5. Restaurar todos los archivos que pertenecen a estas carpetas
+  await sql`
+    UPDATE files
+    SET is_trashed = false, trashed_at = NULL, updated_at = NOW()
+    WHERE folder_id = ANY(${allFolderIds}::uuid[]) AND owner_id = ${ownerId}
+  `;
 };
+
+
