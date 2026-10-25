@@ -1,7 +1,11 @@
 
 
 import { sql } from "../config/db.js";
-import { softDeleteFolderHierarchy, restoreFolderHierarchy } from "../services/storageService.js";
+import { 
+  softDeleteFolderHierarchy, 
+  restoreFolderHierarchy, 
+  permanentDeleteFolderHierarchy 
+} from "../services/storageService.js";
 
 // Create new folder
 // POST /api/folders
@@ -378,8 +382,8 @@ export const permanentDeleteFolder = async (req, res) => {
       return res.status(404).json({ error: "Folder not found." })
     }
 
-    //TODO (permanent delete folder fn)
-    return res.status(200).json({ message: "Folder permanently deleted. " })
+    await permanentDeleteFolderHierarchy(folder.id, req.user.id);
+    return res.status(200).json({ message: "Folder permanently deleted." });
   } catch (error) {
     return res.status(500).json({ error: error.message })
   }

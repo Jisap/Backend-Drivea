@@ -1,4 +1,5 @@
 import { sql } from "../config/db.js";
+import { deleteMultipleFromStorage } from "../utils/s3Helper.js";
 
 /**
  * Obtiene el ID de la carpeta dada y todos los IDs de sus subcarpetas descendientes (a cualquier nivel de profundidad).
@@ -22,6 +23,31 @@ export const getFolderHierarchyIds = async (folderId, ownerId) => {
   `;
 
   return [folderId, ...descendants.map((f) => f.id)];
+};
+
+/**
+ * Ajusta el almacenamiento consumido (storage_used) por un usuario sumando o restando bytes.
+ *
+ * Explicación técnica:
+ * - deltaBytes puede ser positivo (subida de archivos) o negativo (eliminación de archivos).
+ * - GREATEST(0, storage_used + deltaBytes): Previene que el almacenamiento quede en valores
+ *   negativos por posibles desajustes o inconsistencias en la base de datos.
+ * - postgres devuelve columnas BIGINT como string en Node.js, por eso convertimos a Number.
+ *
+ * @param {string} userId - ID del usuario
+ * @param {number} deltaBytes - Cantidad de bytes a sumar (+) o restar (-)
+ * @returns {Promise<number|null>} El nuevo almacenamiento consumido en bytes
+ */
+export const adjustUserStorage = async (userId, deltaBytes) => {
+  const [user] = await sql`
+    UPDATE users
+    SET storage_used = GREATEST(0, storage_used + ${deltaBytes}),
+        updated_at = NOW() 
+    WHERE id = ${userId} 
+    RETURNING storage_used
+  `;
+
+  return user ? Number(user.storage_used) : null;
 };
 
 /**
@@ -190,6 +216,56 @@ export const restoreFolderHierarchy = async (folderId, ownerId) => {
     SET is_trashed = false, trashed_at = NULL, updated_at = NOW()
     WHERE folder_id = ANY(${allFolderIds}::uuid[]) AND owner_id = ${ownerId}
   `;
+};
+
+/**
+ * Elimina definitivamente y de forma irreversible una carpeta y todo su contenido.
+ *
+ * Flujo:
+ * 1. Obtiene la lista completa de carpetas (la principal + todas las subcarpetas descendientes).
+ * 2. Consulta los archivos almacenados en esas carpetas (IDs, s3_keys y tamaños).
+ * 3. Ejecuta en paralelo:
+ *    - Borrado físico de los objetos en S3 / Neon Storage.
+ *    - Revocación y borrado de share_links de carpetas y archivos.
+ *    - Borrado de registros en la tabla 'files'.
+ *    - Borrado de registros en la tabla 'folders'.
+ * 4. Si se borraron archivos, decrementa el espacio consumido (storage_used) del usuario.
+ *
+ * @param {string} folderId - ID de la carpeta a eliminar definitivamente
+ * @param {string} ownerId - ID del usuario dueño
+ * @returns {Promise<{ totalFreedSize: number }>} Total de bytes liberados
+ */
+export const permanentDeleteFolderHierarchy = async (folderId, ownerId) => {
+  const allFolderIds = await getFolderHierarchyIds(folderId, ownerId);
+
+  const files = await sql`
+    SELECT id, s3_key, size FROM files
+    WHERE folder_id = ANY(${allFolderIds}::uuid[]) 
+      AND owner_id = ${ownerId}
+  `;
+
+  const s3Keys = files.map((f) => f.s3_key);
+  const fileIds = files.map((f) => f.id);
+  const totalFreedSize = files.reduce((acc, f) => acc + Number(f.size), 0);
+
+  // Ejecución concurrente del borrado en almacenamiento externo y base de datos
+  await Promise.all([
+    s3Keys.length > 0 ? deleteMultipleFromStorage(s3Keys) : Promise.resolve(),
+    cleanupShareLinks(fileIds, allFolderIds),
+    fileIds.length > 0
+      ? sql`DELETE FROM files WHERE id = ANY(${fileIds}::uuid[])`
+      : Promise.resolve(),
+    sql`DELETE FROM folders WHERE id = ANY(${allFolderIds}::uuid[])`,
+  ]);
+
+  // Si había archivos, descontar el espacio del almacenamiento del usuario
+  if (totalFreedSize > 0) {
+    await adjustUserStorage(ownerId, -totalFreedSize);
+  }
+
+  return {
+    totalFreedSize,
+  };
 };
 
 
