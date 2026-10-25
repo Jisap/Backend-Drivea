@@ -4,6 +4,7 @@ import cors from "cors"
 import cookieParser from "cookie-parser"
 import { initDB } from "./config/db.js";
 import authRouter from "./routes/authRoutes.js";
+import folderRouter from "./routes/folderRoutes.js";
 
 const app = express();
 
@@ -23,6 +24,7 @@ app.get("/", (_req, res) => res.send("Server is running"));
 
 //App API routes
 app.use("/api/auth", authRouter);
+app.use("/api/folders", folderRouter);
 
 //Error handling middleware
 app.use((err, _req, res, _next) => {
