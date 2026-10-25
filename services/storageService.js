@@ -97,3 +97,23 @@ export const softDeleteFolderHierarchy = async (folderId, ownerId) => {
     cleanupShareLinks(fileIds, allFolderIds),
   ]);
 };
+
+// Restore a folder and all its contents (recursive subfolders & files)
+export const restoreFolderHierarchy = async (folderId, ownerId) => {
+  const allFolderIds = await getFolderHierarchyIds(folderId, ownerId);
+
+  await Promise.all([
+    sql`
+      UPDATE folders
+      SET is_trashed = false, trashed_at = null, updated_at = NOW()
+      WHERE id = ANY(${allFolderIds}::uuid[])
+        AND owner_id = ${ownerId}
+    `,
+    sql`
+      UPDATE files
+      SET is_trashed=false, trashed_at=NULL, updated_at=NOW()
+      WHERE folder_id = ANY(${allFolderIds}::uuid[])
+        AND owner_id = ${ownerId}
+    `,
+  ])
+};

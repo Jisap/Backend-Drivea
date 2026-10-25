@@ -1,6 +1,7 @@
 
 
 import { sql } from "../config/db.js";
+import { softDeleteFolderHierarchy } from "../services/storageService.js";
 
 // Create new folder
 // POST /api/folders
@@ -333,7 +334,7 @@ export const softDeleteFolder = async (req, res) => {
       return res.status(404).json({ error: "Folder not found." })
     }
 
-    //TODO (soft delete folder)
+    await softDeleteFolderHierarchy(folder.id, req.user.id)
     return res.status(200).json({ message: "Folder moved to Trash. " })
   } catch (error) {
     return res.status(500).json({ error: error.message })
