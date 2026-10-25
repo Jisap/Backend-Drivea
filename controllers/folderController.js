@@ -321,7 +321,23 @@ export const moveFolder = async (req, res) => {
 // Soft delete folder (move to trash)
 // DELETE /api/folders/:id/trash
 export const softDeleteFolder = async (req, res) => {
+  try {
+    const [folder] = await sql`
+      SELECT id FROM folders
+      WHERE id=${req.params.id} 
+        AND owner_id=${req.user.id} 
+        AND is_trashed=false
+    `;
 
+    if (!folder) {
+      return res.status(404).json({ error: "Folder not found." })
+    }
+
+    //TODO (soft delete folder)
+    return res.status(200).json({ message: "Folder moved to Trash. " })
+  } catch (error) {
+    return res.status(500).json({ error: error.message })
+  }
 }
 
 // Restore folder from trash
