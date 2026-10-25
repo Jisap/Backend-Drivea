@@ -365,5 +365,21 @@ export const restoreFolder = async (req, res) => {
 // Permanently delete folder and all nested content
 // DELETE /api/folders/:id/permanent
 export const permanentDeleteFolder = async (req, res) => {
+  try {
+    const [folder] = await sql`
+      SELECT id FROM folders
+      WHERE id=${req.params.id} 
+        AND owner_id=${req.user.id} 
+        AND is_trashed=true
+    `;
 
+    if (!folder) {
+      return res.status(404).json({ error: "Folder not found." })
+    }
+
+    //TODO (permanent delete folder fn)
+    return res.status(200).json({ message: "Folder permanently deleted. " })
+  } catch (error) {
+    return res.status(500).json({ error: error.message })
+  }
 }
