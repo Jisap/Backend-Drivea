@@ -103,10 +103,14 @@ export const uploadFiles = async (req, res) => {
   }
 };
 
-// Get files in folder
+// ============================================================================
+// Obtener archivos de una carpeta o por búsqueda global
 // GET /api/files
+// Query params: folder / folder_id, search, sort, page, limit
+// ============================================================================
 export const getFiles = async (req, res) => {
   try {
+    // 1. Extraer parámetros de búsqueda, filtrado, orden y paginación desde req.query
     const {
       folder,
       folder_id,
@@ -116,35 +120,55 @@ export const getFiles = async (req, res) => {
       limit = 50
     } = req.query;
 
-    const pageNum = Math.max(1, parseInt(page, 10) || 1);
-    const limitNum = Math.max(1, parseInt(limit, 10) || 50);
-    const offset = (pageNum - 1) * limitNum;
+    // 2. Normalizar la paginación: aseguramos números enteros positivos válidos
+    const pageNum = Math.max(1, parseInt(page, 10) || 1);    // Página mínima: 1
+    const limitNum = Math.max(1, parseInt(limit, 10) || 50); // Archivos por página (por defecto 50)
+    const offset = (pageNum - 1) * limitNum;                 // Cuántos registros saltar en SQL
+
+    // 3. Obtener el criterio de ordenamiento seguro desde el diccionario SORT_MAP
+    // Si envían un sort no reconocido, fallback a 'name ASC'
     const orderBy = SORT_MAP[sort] || SORT_MAP.name_asc;
+
+    // 4. Determinar la carpeta objetivo: si es "null", "root" o no viene nada, es la raíz (null)
     const targetFolder = folder_id ?? folder;
     const targetFolderId = !targetFolder || targetFolder === "null" || targetFolder === "root" ? null : targetFolder;
-    const isSearch = Boolean(search?.trim());
-    const pattern = `%${search?.trim()}%`;
 
+    // 5. Modo de consulta: ¿Búsqueda global o listado dentro de una carpeta?
+    // Si viene texto en `search`, buscamos por nombre en cualquier ubicación del usuario
+    const isSearch = Boolean(search?.trim());
+    const pattern = `%${search?.trim()}%`; // Patrón ILIKE para coincidencia parcial sin distinguir mayúsculas/minúsculas
+
+    // 6. Ejecutar en paralelo: consulta de registros paginados y conteo total de coincidencias
     const [rows, countRows] = await Promise.all([
+      // A. Consulta de archivos con ordenamiento y paginación (LIMIT y OFFSET)
       sql`
         SELECT * FROM files
         WHERE owner_id = ${req.user.id} 
           AND is_trashed = false
-          AND (${isSearch}::boolena = true 
-          AND name ILIKE ${pattern} OR ${isSearch}::boolean = false AND folder_id IS NOT DISTINCT FROM ${targetFolderId}) 
-          ORDER BY ${sql.unsafe(orderBy)}
-          LIMIT ${limitNum} OFFSET ${offset}
+          AND (
+            (${isSearch}::boolean = true AND name ILIKE ${pattern})                             -- Si hay búsqueda, busca por nombre en cualquier carpeta
+            OR 
+            (${isSearch}::boolean = false AND folder_id IS NOT DISTINCT FROM ${targetFolderId}) -- Si no hay búsqueda, busca en la carpeta especificada
+          )
+        ORDER BY ${sql.unsafe(orderBy)}
+        LIMIT ${limitNum} OFFSET ${offset}
       `,
+      // B. Conteo total de archivos para calcular el número total de páginas
       sql`
         SELECT COUNT(*)::int AS total FROM files
         WHERE owner_id = ${req.user.id} 
           AND is_trashed = false
-          AND (${isSearch}::boolena = true 
-          AND name ILIKE ${pattern} OR ${isSearch}::boolean = false AND folder_id IS NOT DISTINCT FROM ${targetFolderId})     `
-    ])
+          AND (
+            (${isSearch}::boolean = true AND name ILIKE ${pattern})                             -- Si hay búsqueda, cuenta por nombre en cualquier carpeta
+            OR 
+            (${isSearch}::boolean = false AND folder_id IS NOT DISTINCT FROM ${targetFolderId}) -- Si no hay búsqueda, cuenta en la carpeta especificada
+          )
+      `
+    ]);
 
-    const totalFiles = countRows[0].total;
+    const totalFiles = countRows[0]?.total || 0;
 
+    // 7. Responder con los archivos y la metadata de paginación
     return res.status(200).json({
       files: rows,
       pagination: {
@@ -153,12 +177,12 @@ export const getFiles = async (req, res) => {
         totalFiles,
         totalPages: Math.ceil(totalFiles / limitNum),
       }
-    })
+    });
 
   } catch (error) {
-    return res.status(500).json({ error: error.message })
+    return res.status(500).json({ error: error.message });
   }
-}
+};
 
 // Get presigned preview/download URL for a file
 // GET /api/files/:id/preview
