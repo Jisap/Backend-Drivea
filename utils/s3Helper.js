@@ -58,5 +58,7 @@ export const deleteObjectFromStorage = async (key) => {
 
 // Batch permanently delete multiple keys from Neon Object Storage
 export const deleteMultipleFromStorage = async (keys) => {
+  if (!keys?.length) return;
+  await Promise.all(keys.map(deleteObjectFromStorage))
 
 }
