@@ -4,7 +4,13 @@
 // Upload file(s)
 // POST /api/files/upload
 export const uploadFiles = async (req, res) => {
+  try {
+    if (!req.files?.length) {
+      return res.status(400).json({ error: "No files uploaded." })
+    }
+  } catch (error) {
 
+  }
 }
 
 // Get files in folder
