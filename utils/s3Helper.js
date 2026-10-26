@@ -1,4 +1,5 @@
-import { PutObjectCommand } from "@aws-sdk/client-s3"
+import { GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3"
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner"
 
 
 // Upload file to Neon Object Storage
@@ -15,7 +16,11 @@ export const uploadToStorage = async (fileBuffer, key, mimeType) => {
 
 // Get presigned download/preview URL for a file (valid for 10 hour)
 export const getSignedFileUrl = async (key) => {
-
+  const command = new GetObjectCommand({
+    Bucket: BUCKET_NAME,
+    kEY: key,
+  });
+  return await getSignedUrl(client, command, { expiresIn: 36000 });
 }
 
 // Permanently delete an object and its versions from Neon Object Storage
