@@ -4,6 +4,15 @@ import crypto from "crypto";
 import { uploadToStorage } from "../utils/s3Helper.js";
 import { adjustUserStorage } from "../services/storageService.js";
 
+const SORT_MAP = {
+  name_asc: "name ASC",
+  name_desc: "name DESC",
+  size_asc: "size ASC",
+  size_desc: "size DESC",
+  date_asc: "created_at ASC",
+  date_desc: "created_at DESC",
+}
+
 // ============================================================================
 // Subir uno o varios archivos (Upload)
 // POST /api/files/upload
@@ -97,7 +106,58 @@ export const uploadFiles = async (req, res) => {
 // Get files in folder
 // GET /api/files
 export const getFiles = async (req, res) => {
+  try {
+    const {
+      folder,
+      folder_id,
+      search,
+      sort = "name_asc",
+      page = 1,
+      limit = 50
+    } = req.query;
 
+    const pageNum = Math.max(1, parseInt(page, 10) || 1);
+    const limitNum = Math.max(1, parseInt(limit, 10) || 50);
+    const offset = (pageNum - 1) * limitNum;
+    const orderBy = SORT_MAP[sort] || SORT_MAP.name_asc;
+    const targetFolder = folder_id ?? folder;
+    const targetFolderId = !targetFolder || targetFolder === "null" || targetFolder === "root" ? null : targetFolder;
+    const isSearch = Boolean(search?.trim());
+    const pattern = `%${search?.trim()}%`;
+
+    const [rows, countRows] = await Promise.all([
+      sql`
+        SELECT * FROM files
+        WHERE owner_id = ${req.user.id} 
+          AND is_trashed = false
+          AND (${isSearch}::boolena = true 
+          AND name ILIKE ${pattern} OR ${isSearch}::boolean = false AND folder_id IS NOT DISTINCT FROM ${targetFolderId}) 
+          ORDER BY ${sql.unsafe(orderBy)}
+          LIMIT ${limitNum} OFFSET ${offset}
+      `,
+      sql`
+        SELECT COUNT(*)::int AS total FROM files
+        WHERE owner_id = ${req.user.id} 
+          AND is_trashed = false
+          AND (${isSearch}::boolena = true 
+          AND name ILIKE ${pattern} OR ${isSearch}::boolean = false AND folder_id IS NOT DISTINCT FROM ${targetFolderId})     `
+    ])
+
+    const totalFiles = countRows[0].total;
+
+    return res.status(200).json({
+      files: rows,
+      pagination: {
+        page: pageNum,
+        limit: limitNum,
+        totalFiles,
+        totalPages: Math.ceil(totalFiles / limitNum),
+      }
+    })
+
+  } catch (error) {
+    return res.status(500).json({ error: error.message })
+  }
 }
 
 // Get presigned preview/download URL for a file
