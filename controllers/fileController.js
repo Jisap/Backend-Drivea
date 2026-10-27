@@ -184,27 +184,38 @@ export const getFiles = async (req, res) => {
   }
 };
 
-// Get presigned preview/download URL for a file
+// ============================================================================
+// Obtener URL firmada para previsualización o descarga de un archivo
 // GET /api/files/:id/preview
+// ============================================================================
 export const getFilePreviewUrl = async (req, res) => {
   try {
+    // 1. Buscar el archivo en la base de datos
+    // Verificamos que el id coincida, que pertenezca al usuario activo
+    // y que no esté en la papelera (is_trashed = false)
     const [file] = await sql`
       SELECT * FROM files 
       WHERE id = ${req.params.id} 
-      AND owner_id = ${req.user.id}
+        AND owner_id = ${req.user.id}
+        AND is_trashed = false
     `;
 
+    // 2. Seguridad: si no existe o no le pertenece al usuario, retornamos 404
     if (!file) {
-      return res.status(404).json({ error: "File not found" });
+      return res.status(404).json({ error: "File not found." });
     }
 
+    // 3. Generar la URL prefirmada criptográfica en S3/Neon Storage
+    // Usamos el 's3_key' almacenado en BD. La URL tendrá validez temporal
+    // permitiendo descargar o previsualizar el archivo sin hacer el bucket público.
     const downloadUrl = await getSignedFileUrl(file.s3_key);
 
+    // 4. Devolvemos la URL generada junto con los datos del archivo
     return res.status(200).json({ url: downloadUrl, file });
   } catch (error) {
     return res.status(500).json({ error: error.message });
   }
-}
+};
 
 // Rename file
 // PATCH /api/files/:id/rename
