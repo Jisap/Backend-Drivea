@@ -347,7 +347,21 @@ export const softDeleteFile = async (req, res) => {
 // Restore file from trash
 // POST /api/files/:id/restore
 export const restoreFile = async (req, res) => {
+  try {
+    const [file] = await sql`
+      SET is_trashed = false, trashed_at = null, updated_at = NOW()
+      WHERE id = ${req.params.id} AND owner_id = ${req.user.id} AND is_trashed = true
+      RETURNING id
+    `
+    if (!file) {
+      return res.status(404).json({ error: "File not found in Trash." })
+    }
 
+    return res.status(200).json({ message: "File restored from Trash." })
+
+  } catch (error) {
+    return res.status(500).json({ error: error.message });
+  }
 }
 
 // Permanently delete file 
