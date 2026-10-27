@@ -217,33 +217,43 @@ export const getFilePreviewUrl = async (req, res) => {
   }
 };
 
-// Rename file
+// ============================================================================
+// Renombrar archivo
 // PATCH /api/files/:id/rename
+// ============================================================================
 export const renameFile = async (req, res) => {
   try {
     const { name } = req.body;
-    if (!name?.trim()) {
-      return res.status(400).json({ error: "File name is required." })
+
+    // 1. Validación básica: evitar nombres vacíos o que solo contengan espacios
+    if (!name || typeof name !== "string" || !name.trim()) {
+      return res.status(400).json({ error: "File name is required and must be a valid string." });
     }
 
+    // 2. Actualizar el nombre en la base de datos
+    // - Comprobamos que pertenezca al usuario activo (owner_id = req.user.id)
+    // - Que no esté en la papelera (is_trashed = false)
+    // - Actualizamos la marca de tiempo 'updated_at' a NOW()
     const [file] = await sql`
-      UPDATE files
-      SET name = ${name.trim()}, updated_at = NOW()
-      WHERE id = ${req.params.id} 
-        AND owner_id=${req.user.id} 
-        AND is_trashed=false
-        RETURNING *
-    `
+      UPDATE files                                          -- Actualizamos la tabla files
+      SET name = ${name.trim()}, updated_at = NOW()         -- Establecemos el nuevo nombre y actualizamos la fecha
+      WHERE id = ${req.params.id}                           -- Donde el id sea igual al id proporcionado por la URL
+        AND owner_id = ${req.user.id}                       -- Y que pertenezca al usuario autenticado
+        AND is_trashed = false                              -- Y que no se encuentre en la papelera
+      RETURNING *;                                          -- Devolvemos el registro completo actualizado
+    `;
 
+    // 3. Si no se encontró el archivo (o no le pertenece al usuario / está en papelera), retornamos 404
     if (!file) {
-      return res.status(404).json({ error: "File not found." })
+      return res.status(404).json({ error: "File not found." });
     }
 
-    return res.status(200).json(file);
+    // 4. Retornamos el objeto del archivo actualizado
+    return res.status(200).json({ file });
   } catch (error) {
     return res.status(500).json({ error: error.message });
   }
-}
+};
 
 // Move file to different folder
 // PATCH /api/files/:id/move
