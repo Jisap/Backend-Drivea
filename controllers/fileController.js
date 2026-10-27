@@ -344,25 +344,39 @@ export const softDeleteFile = async (req, res) => {
   }
 };
 
-// Restore file from trash
+// ============================================================================
+// Restaurar archivo de la papelera
 // POST /api/files/:id/restore
+// ============================================================================
 export const restoreFile = async (req, res) => {
   try {
+    // 1. Restaurar el estado del archivo en la base de datos
+    // - Marcamos is_trashed = false
+    // - Reseteamos trashed_at a null
+    // - Actualizamos updated_at con la fecha actual
+    // - Verificamos que el archivo pertenezca al usuario y actualmente ESTÉ en la papelera (is_trashed = true)
     const [file] = await sql`
-      SET is_trashed = false, trashed_at = null, updated_at = NOW()
-      WHERE id = ${req.params.id} AND owner_id = ${req.user.id} AND is_trashed = true
-      RETURNING id
-    `
+      UPDATE files 
+      SET is_trashed = false, 
+          trashed_at = null, 
+          updated_at = NOW()
+      WHERE id = ${req.params.id} 
+        AND owner_id = ${req.user.id} 
+        AND is_trashed = true
+      RETURNING id;
+    `;
+
+    // 2. Si no se encontró ningún archivo con esas condiciones
     if (!file) {
-      return res.status(404).json({ error: "File not found in Trash." })
+      return res.status(404).json({ error: "File not found in Trash." });
     }
 
-    return res.status(200).json({ message: "File restored from Trash." })
-
+    // 3. Confirmación de restauración exitosa
+    return res.status(200).json({ message: "File restored from Trash." });
   } catch (error) {
     return res.status(500).json({ error: error.message });
   }
-}
+};
 
 // Permanently delete file 
 // DELETE /api/files/:id/permanent
