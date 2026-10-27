@@ -2,7 +2,7 @@ import { sql } from "../config/db.js";
 import path from "path";
 import crypto from "crypto";
 import { getSignedFileUrl, uploadToStorage } from "../utils/s3Helper.js";
-import { adjustUserStorage, cleanupShareLinks } from "../services/storageService.js";
+import { adjustUserStorage, cleanupShareLinks, permanentDeleteFileRecord } from "../services/storageService.js";
 
 const SORT_MAP = {
   name_asc: "name ASC",
@@ -382,6 +382,16 @@ export const restoreFile = async (req, res) => {
 // DELETE /api/files/:id/permanent
 export const permanentDeleteFile = async (req, res) => {
   try {
+    const [file] = await sql`
+      SELECT * FROM files WHERE id = ${req.params.id} AND owner_id = ${req.user.id}
+    `
+
+    if (!file) {
+      return res.status(404).json({ error: "File not found." })
+    }
+
+    await permanentDeleteFileRecord(file, req.user.id)
+    return res.status(200).json({ message: "File permanently deleted." })
 
   } catch (error) {
     return res.status(500).json({ error: error.message });
