@@ -292,3 +292,59 @@ export const permanentDeleteFileRecord = async (file, ownerId) => {
   }
 };
 
+// ============================================================================
+// Vaciar completamente la papelera del usuario (Empty Trash)
+// ============================================================================
+// Elimina de forma permanente todos los archivos y carpetas en la papelera del usuario,
+// erradica los objetos físicos en S3/Neon, revoca enlaces compartidos y libera la cuota.
+export const emptyTrashHierarchy = async (ownerId) => {
+  // 1. Consultar en paralelo todos los archivos y carpetas en la papelera de este usuario
+  const [trashedFiles, trashedFolders] = await Promise.all([
+    sql`
+      SELECT id, s3_key, size FROM files 
+      WHERE owner_id = ${ownerId} 
+        AND is_trashed = true
+    `,
+    sql`
+      SELECT id FROM folders 
+      WHERE owner_id = ${ownerId} 
+        AND is_trashed = true
+    `,
+  ]);
+
+  // 2. Extraer claves de S3, IDs y calcular el total de bytes que se van a liberar
+  const s3Keys = trashedFiles.map((f) => f.s3_key);
+  const totalFreedBytes = trashedFiles.reduce((acc, f) => acc + Number(f.size), 0);
+  const trashedFileIds = trashedFiles.map((f) => f.id);
+  const trashedFolderIds = trashedFolders.map((f) => f.id);
+
+  // 3. Ejecutar de forma simultánea (concurrente) la purga total:
+  //    A. Borrar los archivos reales en S3/Neon Storage
+  //    B. Invalidar los enlaces compartidos de todos los archivos y carpetas eliminados
+  //    C. Eliminar los registros de archivos de la base de datos
+  //    D. Eliminar los registros de carpetas de la base de datos
+  await Promise.all([
+    s3Keys.length > 0 ? deleteMultipleFromStorage(s3Keys) : Promise.resolve(),
+    cleanupShareLinks(trashedFileIds, trashedFolderIds),
+    sql`
+      DELETE FROM files WHERE owner_id = ${ownerId} AND is_trashed = true
+    `,
+    sql`
+      DELETE FROM folders WHERE owner_id = ${ownerId} AND is_trashed = true
+    `
+  ]);
+
+  // 4. Si se borraron archivos, descontar el espacio consumido en la cuota del usuario
+  if (totalFreedBytes > 0) {
+    await adjustUserStorage(ownerId, -totalFreedBytes);
+  }
+
+  // 5. Devolver resumen de la operación
+  return {
+    totalFreedBytes,
+    filesCount: trashedFiles.length,
+    foldersCount: trashedFolders.length,
+  };
+};
+
+
