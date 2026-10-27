@@ -220,7 +220,29 @@ export const getFilePreviewUrl = async (req, res) => {
 // Rename file
 // PATCH /api/files/:id/rename
 export const renameFile = async (req, res) => {
+  try {
+    const { name } = req.body;
+    if (!name?.trim()) {
+      return res.status(400).json({ error: "File name is required." })
+    }
 
+    const [file] = await sql`
+      UPDATE files
+      SET name = ${name.trim()}, updated_at = NOW()
+      WHERE id = ${req.params.id} 
+        AND owner_id=${req.user.id} 
+        AND is_trashed=false
+        RETURNING *
+    `
+
+    if (!file) {
+      return res.status(404).json({ error: "File not found." })
+    }
+
+    return res.status(200).json(file);
+  } catch (error) {
+    return res.status(500).json({ error: error.message });
+  }
 }
 
 // Move file to different folder
