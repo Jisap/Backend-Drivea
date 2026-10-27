@@ -1,7 +1,7 @@
 import { sql } from "../config/db.js";
 import path from "path";
 import crypto from "crypto";
-import { uploadToStorage } from "../utils/s3Helper.js";
+import { getSignedFileUrl, uploadToStorage } from "../utils/s3Helper.js";
 import { adjustUserStorage } from "../services/storageService.js";
 
 const SORT_MAP = {
@@ -187,7 +187,23 @@ export const getFiles = async (req, res) => {
 // Get presigned preview/download URL for a file
 // GET /api/files/:id/preview
 export const getFilePreviewUrl = async (req, res) => {
+  try {
+    const [file] = await sql`
+      SELECT * FROM files 
+      WHERE id = ${req.params.id} 
+      AND owner_id = ${req.user.id}
+    `;
 
+    if (!file) {
+      return res.status(404).json({ error: "File not found" });
+    }
+
+    const downloadUrl = await getSignedFileUrl(file.s3_key);
+
+    return res.status(200).json({ url: downloadUrl, file });
+  } catch (error) {
+    return res.status(500).json({ error: error.message });
+  }
 }
 
 // Rename file
