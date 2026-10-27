@@ -2,7 +2,7 @@ import { sql } from "../config/db.js";
 import path from "path";
 import crypto from "crypto";
 import { getSignedFileUrl, uploadToStorage } from "../utils/s3Helper.js";
-import { adjustUserStorage } from "../services/storageService.js";
+import { adjustUserStorage, cleanupShareLinks } from "../services/storageService.js";
 
 const SORT_MAP = {
   name_asc: "name ASC",
@@ -307,11 +307,42 @@ export const moveFile = async (req, res) => {
   }
 };
 
-// Soft delete file 
+// ============================================================================
+// Enviar archivo a la papelera (Soft delete)
 // DELETE /api/files/:id
+// ============================================================================
 export const softDeleteFile = async (req, res) => {
+  try {
+    // 1. Marcar el archivo como enviado a la papelera (is_trashed = true)
+    // Registramos la fecha de eliminación (trashed_at) y de actualización (updated_at)
+    // Nos aseguramos de que el archivo pertenezca al usuario activo y que aún no esté en papelera
+    const [file] = await sql`
+      UPDATE files 
+      SET is_trashed = true, 
+          trashed_at = NOW(), 
+          updated_at = NOW()
+      WHERE id = ${req.params.id} 
+        AND owner_id = ${req.user.id} 
+        AND is_trashed = false
+      RETURNING *;
+    `;
 
-}
+    // 2. Si no se encontró el archivo (o ya estaba en la papelera / no le pertenece)
+    if (!file) {
+      return res.status(404).json({ error: "File not found." });
+    }
+
+    // 3. Revocar/limpiar enlaces públicos compartidos asociados a este archivo
+    // Primer argumento: array de IDs de archivos a invalidar ([file.id])
+    // Segundo argumento: array de IDs de carpetas (vacío [])
+    await cleanupShareLinks([file.id], []);
+
+    // 4. Confirmación de eliminación lógica exitosa
+    return res.status(200).json({ message: "File moved to trash." });
+  } catch (error) {
+    return res.status(500).json({ error: error.message });
+  }
+};
 
 // Restore file from trash
 // POST /api/files/:id/restore
