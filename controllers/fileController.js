@@ -258,7 +258,38 @@ export const renameFile = async (req, res) => {
 // Move file to different folder
 // PATCH /api/files/:id/move
 export const moveFile = async (req, res) => {
+  try {
+    const targetFolder = req.body.target_folder ?? req.body.targetFolder;
+    if (targetFolder) {
+      const [destFolder] = await sql`
+        SELECT id FROM folders
+        WHERE id = ${targetFolder} 
+          AND owner_id = ${req.user.id} 
+          AND is_trashed = false
+      `;
 
+      if (!destFolder) {
+        return res.status(400).json({ error: "Destination folder not found." })
+      }
+
+      const [file] = await sql`
+        UPDATE files                                                -- Actualizamos el registro del archivo y su carpeta padre 
+        SET folder_id = ${targetFolder || null}, updated_at = NOW() -- Establecemos la nueva carpeta y actualizamos la fecha 
+        WHERE id = ${req.params.id}                                 -- Donde el id sea igual al id proporcionado por la URL
+          AND owner_id = ${req.user.id}                             -- Y que pertenezca al usuario autenticado
+          AND is_trashed = false                                    -- Y que no se encuentre en la papelera 
+        RETURNING *                                                 -- Devolvemos el registro completo actualizado
+      `;
+
+      if (!file) {
+        return res.status(404).json({ error: "File not found." })
+      }
+
+      return res.status(200).json({ file });
+    }
+  } catch (error) {
+    return res.status(500).json({ error: error.message });
+  }
 }
 
 // Soft delete file 
