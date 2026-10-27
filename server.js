@@ -5,6 +5,7 @@ import cookieParser from "cookie-parser"
 import { initDB } from "./config/db.js";
 import authRouter from "./routes/authRoutes.js";
 import folderRouter from "./routes/folderRoutes.js";
+import fileRouter from "./routes/fileRoutes.js";
 
 const app = express();
 
@@ -25,6 +26,7 @@ app.get("/", (_req, res) => res.send("Server is running"));
 //App API routes
 app.use("/api/auth", authRouter);
 app.use("/api/folders", folderRouter);
+app.use("/api/files", fileRouter);
 
 //Error handling middleware
 app.use((err, _req, res, _next) => {
