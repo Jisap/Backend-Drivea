@@ -378,23 +378,37 @@ export const restoreFile = async (req, res) => {
   }
 };
 
-// Permanently delete file 
+// ============================================================================
+// Eliminar archivo permanentemente (Permanent delete)
 // DELETE /api/files/:id/permanent
+// ============================================================================
 export const permanentDeleteFile = async (req, res) => {
   try {
+    // 1. Buscar el archivo verificando propiedad y que esté en la papelera
+    // Solo permitimos borrado definitivo si previamente fue enviado a la papelera (is_trashed = true)
     const [file] = await sql`
-      SELECT * FROM files WHERE id = ${req.params.id} AND owner_id = ${req.user.id}
-    `
+      SELECT id, s3_key, size FROM files 
+      WHERE id = ${req.params.id} 
+        AND owner_id = ${req.user.id}
+        AND is_trashed = true
+    `;
 
+    // 2. Si no se encuentra el archivo (o no está en la papelera / no le pertenece)
     if (!file) {
-      return res.status(404).json({ error: "File not found." })
+      return res.status(404).json({ error: "File not found in trash." });
     }
 
-    await permanentDeleteFileRecord(file, req.user.id)
-    return res.status(200).json({ message: "File permanently deleted." })
+    // 3. Ejecutar el borrado definitivo mediante el servicio centralizado:
+    //    - Elimina el binario y versiones de S3/Neon Storage
+    //    - Elimina enlaces públicos compartidos
+    //    - Borra la fila en la tabla 'files'
+    //    - Descuenta los bytes de la cuota consumida del usuario
+    await permanentDeleteFileRecord(file, req.user.id);
 
+    // 4. Confirmación de eliminación definitiva exitosa
+    return res.status(200).json({ message: "File permanently deleted." });
   } catch (error) {
     return res.status(500).json({ error: error.message });
   }
-}
+};
 
