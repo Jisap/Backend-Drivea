@@ -255,42 +255,57 @@ export const renameFile = async (req, res) => {
   }
 };
 
-// Move file to different folder
+// ============================================================================
+// Mover archivo a otra carpeta (o a la raíz)
 // PATCH /api/files/:id/move
+// ============================================================================
 export const moveFile = async (req, res) => {
   try {
+    // 1. Obtener y normalizar el destino solicitado (soporta target_folder y targetFolder)
     const targetFolder = req.body.target_folder ?? req.body.targetFolder;
-    if (targetFolder) {
+
+    // Si viene undefined, null, "null" o "root", significa que se mueve a la raíz ("My Drive", folder_id = null)
+    const normalizedTargetFolder = !targetFolder || targetFolder === "null" || targetFolder === "root"
+      ? null
+      : targetFolder;
+
+    // 2. Si el destino es una carpeta específica, verificar que exista y pertenezca al usuario
+    if (normalizedTargetFolder) {
       const [destFolder] = await sql`
         SELECT id FROM folders
-        WHERE id = ${targetFolder} 
+        WHERE id = ${normalizedTargetFolder} 
           AND owner_id = ${req.user.id} 
           AND is_trashed = false
       `;
 
       if (!destFolder) {
-        return res.status(400).json({ error: "Destination folder not found." })
+        return res.status(404).json({ error: "Destination folder not found." });
       }
-
-      const [file] = await sql`
-        UPDATE files                                                -- Actualizamos el registro del archivo y su carpeta padre 
-        SET folder_id = ${targetFolder || null}, updated_at = NOW() -- Establecemos la nueva carpeta y actualizamos la fecha 
-        WHERE id = ${req.params.id}                                 -- Donde el id sea igual al id proporcionado por la URL
-          AND owner_id = ${req.user.id}                             -- Y que pertenezca al usuario autenticado
-          AND is_trashed = false                                    -- Y que no se encuentre en la papelera 
-        RETURNING *                                                 -- Devolvemos el registro completo actualizado
-      `;
-
-      if (!file) {
-        return res.status(404).json({ error: "File not found." })
-      }
-
-      return res.status(200).json({ file });
     }
+
+    // 3. Actualizar la carpeta padre (folder_id) del archivo
+    // - Comprobamos que el archivo pertenezca al usuario autenticado
+    // - Y que no esté en la papelera
+    const [file] = await sql`
+      UPDATE files                                                      -- Actualizamos el registro en la tabla files
+      SET folder_id = ${normalizedTargetFolder}, updated_at = NOW()     -- Asignamos la nueva carpeta (o null si es la raíz)
+      WHERE id = ${req.params.id}                                       -- Donde el id coincida con el parámetro de la ruta
+        AND owner_id = ${req.user.id}                                   -- Y pertenezca al usuario activo
+        AND is_trashed = false                                          -- Y no esté en la papelera
+      RETURNING *;                                                      -- Devolvemos el registro del archivo actualizado
+    `;
+
+    // 4. Si el archivo no existe o no cumple las condiciones de seguridad
+    if (!file) {
+      return res.status(404).json({ error: "File not found." });
+    }
+
+    // 5. Retornamos el archivo con su nueva ubicación
+    return res.status(200).json({ file });
   } catch (error) {
     return res.status(500).json({ error: error.message });
   }
-}
+};
 
 // Soft delete file 
 // DELETE /api/files/:id
