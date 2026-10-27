@@ -1,5 +1,5 @@
 import { sql } from "../config/db.js";
-import { deleteMultipleFromStorage } from "../utils/s3Helper.js";
+import { deleteMultipleFromStorage, deleteObjectFromStorage } from "../utils/s3Helper.js";
 
 /**
  * Obtiene el ID de la carpeta dada y todos los IDs de sus subcarpetas descendientes (a cualquier nivel de profundidad).
@@ -268,4 +268,27 @@ export const permanentDeleteFolderHierarchy = async (folderId, ownerId) => {
   };
 };
 
+// ============================================================================
+// Eliminar permanentemente un archivo individual y liberar espacio
+// ============================================================================
+// Parámetros:
+// - file: Objeto completo del archivo obtenido de la BD (debe contener id, s3_key, size)
+// - ownerId: UUID del usuario propietario para actualizar su cuota
+export const permanentDeleteFileRecord = async (file, ownerId) => {
+  // 1. Ejecutar de forma simultánea (concurrente) las 3 tareas de eliminación:
+  //    A. Borrar el objeto físico y sus versiones de S3/Neon Storage (deleteObjectFromStorage)
+  //    B. Invalidar/eliminar enlaces públicos compartidos del archivo (cleanupShareLinks)
+  //    C. Borrar el registro definitivo del archivo en la tabla PostgreSQL (DELETE FROM files)
+  await Promise.all([
+    deleteObjectFromStorage(file.s3_key),
+    cleanupShareLinks([file.id], []),
+    sql`DELETE FROM files WHERE id = ${file.id}`
+  ]);
+
+  // 2. Liberar el espacio en la cuota del usuario:
+  // Restamos los bytes del archivo (usando valor negativo) a storage_used
+  if (Number(file.size) > 0) {
+    await adjustUserStorage(ownerId, -Number(file.size));
+  }
+};
 

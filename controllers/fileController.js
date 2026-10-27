@@ -381,6 +381,10 @@ export const restoreFile = async (req, res) => {
 // Permanently delete file 
 // DELETE /api/files/:id/permanent
 export const permanentDeleteFile = async (req, res) => {
+  try {
 
+  } catch (error) {
+    return res.status(500).json({ error: error.message });
+  }
 }
 
