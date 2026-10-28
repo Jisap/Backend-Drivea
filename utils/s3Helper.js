@@ -1,9 +1,9 @@
-import { 
-  DeleteObjectCommand, 
-  DeleteObjectsCommand, 
-  GetObjectCommand, 
-  ListObjectVersionsCommand, 
-  PutObjectCommand 
+import {
+  DeleteObjectCommand,
+  DeleteObjectsCommand,
+  GetObjectCommand,
+  ListObjectVersionsCommand,
+  PutObjectCommand
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { BUCKET_NAME, client } from "../config/s3.js"; // Importamos el cliente configurado de S3 y el nombre del bucket
@@ -84,9 +84,9 @@ export const deleteObjectFromStorage = async (key) => {
       }));
     } else {
       // 4. Si no tiene versiones registradas (ej: versionado desactivado), eliminamos el objeto simple
-      await client.send(new DeleteObjectCommand({ 
-        Bucket: BUCKET_NAME, 
-        Key: key 
+      await client.send(new DeleteObjectCommand({
+        Bucket: BUCKET_NAME,
+        Key: key
       }));
     }
   } catch (err) {
@@ -94,14 +94,14 @@ export const deleteObjectFromStorage = async (key) => {
     // Si falla listar versiones (por falta de permisos de IAM para ListVersions o bucket sin versionado),
     // intentamos un borrado simple directo
     try {
-      await client.send(new DeleteObjectCommand({ 
-        Bucket: BUCKET_NAME, 
-        Key: key 
+      await client.send(new DeleteObjectCommand({
+        Bucket: BUCKET_NAME,
+        Key: key
       }));
     } catch (fallbackErr) {
       // Registramos el error si ambos intentos fallan para no tumbar la aplicación
       console.error('[Storage Delete Error]:', fallbackErr.message);
-      return;
+      throw fallbackErr
     }
   }
 };
