@@ -1,5 +1,5 @@
 import { sql } from "../config/db.js";
-import { emptyTrashHierarchy } from "../services/storageService";
+import { emptyTrashHierarchy } from "../services/storageService.js";
 
 // ============================================================================
 // Obtener todos los elementos en la papelera (archivos y carpetas)
@@ -35,12 +35,24 @@ export const getTrashItems = async (req, res) => {
   }
 };
 
-// Empty user trash (permanently delete all trashed items)
+// ============================================================================
+// Vaciar la papelera del usuario (borrado definitivo total)
 // POST /api/trash/empty
+// ============================================================================
 export const emptyTrash = async (req, res) => {
   try {
-    await emptyTrashHierarchy(req.user.id);
-    return res.status(200).json({ message: "Trash emptied successfully" });
+    // 1. Delegar el vaciado al servicio centralizado de almacenamiento:
+    //    - Elimina todos los objetos físicos de S3/Neon
+    //    - Revoca todos los enlaces públicos compartidos
+    //    - Borra permanentemente los registros en las tablas 'files' y 'folders'
+    //    - Reajusta la cuota de espacio disponible del usuario
+    const result = await emptyTrashHierarchy(req.user.id);
+
+    // 2. Responder al cliente con mensaje de éxito y resumen de la operación
+    return res.status(200).json({ 
+      message: "Trash emptied successfully.",
+      ...result // { totalFreedBytes, filesCount, foldersCount }
+    });
   } catch (error) {
     return res.status(500).json({ error: error.message });
   }
