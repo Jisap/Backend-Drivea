@@ -52,7 +52,7 @@ export const createShareLink = async (req, res) => {
       await sql`
         DELETE FROM share_links WHERE id = ${existing.id}
       `;
-    } 
+    }
     // B. Si existe y aún es válido, lo reutilizamos para no generar duplicados innecesarios
     else if (existing) {
       return res.status(200).json({ share_link: existing, is_existing: true });
@@ -85,7 +85,7 @@ export const createShareLink = async (req, res) => {
 
     // 8. Responder con el enlace recién creado
     return res.status(201).json({ share_link, is_existing: false });
-    
+
   } catch (error) {
     return res.status(500).json({ error: error.message });
   }
@@ -94,13 +94,39 @@ export const createShareLink = async (req, res) => {
 // Get user's share links with single-query resource resolution
 // GET /api/shares
 export const getUserShareLInks = async (req, res) => {
-  
+  try {
+    const activeShareLinks = await sql`
+      SELECT sl.*,
+        CASE 
+          WHEN sl.resource_type = "file" THEN json_build_object("id", f.id, "name", f.name, "mime_type", f.mime_type, "size", f.size)
+          WHEN sl.resource_type = "folder" THEN json_build_object("id", fo.id, "name", fo.name)
+        END AS resource
+      FROM share_links sl
+      LEFT JOIN files f ON sl.resource_type = "file" 
+        AND f.id = sl.resource_id 
+        AND f.is_trashed = false
+      LEFT JOIN folders pf ON f.folder_id = pf.id
+      LEFT JOIN folders fo ON sl.resource_type = "folder"
+        AND fo.id = sl.resource_id
+        AND fo.is_trashed = false
+      WHERE  sl.owner_id = ${req.user.id}
+      AND (
+        (sl.resource_type = "file" AND f.id IS NOT NULL AND (f.folder_id IS NULL OR pf.is_trashed = false))
+        OR 
+          (sl.resource_type = "folder" AND fo.id IS NOT NULL)
+      )
+      ORDER BY sl.created_at DESC
+    `;
+    return res.status(200).json({ share_links: activeShareLinks });
+  } catch (error) {
+    return res.status(500).json({ error: error.message });
+  }
 }
 
 // Access shared item by token (public link for anyone)
 // GET /api/shares/access/:token
-export const accessShareLink = async (req,res) => {
-    
+export const accessShareLink = async (req, res) => {
+
 }
 
 // Revoke/delete share link
