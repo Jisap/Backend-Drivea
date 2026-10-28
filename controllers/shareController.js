@@ -91,37 +91,76 @@ export const createShareLink = async (req, res) => {
   }
 };
 
-// Get user's share links with single-query resource resolution
+// ============================================================================
+// Obtener todos los enlaces compartidos activos del usuario
 // GET /api/shares
-export const getUserShareLInks = async (req, res) => {
+// ============================================================================
+// Resuelve en UNA SOLA consulta SQL (Single-Query) los enlaces junto con
+// la información del recurso compartido (sea archivo o carpeta), omitiendo
+// aquellos cuyos recursos hayan sido enviados a la papelera o eliminados.
+export const getUserShareLinks = async (req, res) => {
   try {
     const activeShareLinks = await sql`
-      SELECT sl.*,
+      SELECT 
+        sl.*, -- Todas las columnas de la tabla share_links (id, token, permission, expires_at, etc.)
+        
+        -- Construcción dinámica de un objeto JSON 'resource' según el tipo de recurso
         CASE 
-          WHEN sl.resource_type = "file" THEN json_build_object("id", f.id, "name", f.name, "mime_type", f.mime_type, "size", f.size)
-          WHEN sl.resource_type = "folder" THEN json_build_object("id", fo.id, "name", fo.name)
+          -- Si es un archivo: empaqueta id, nombre, mimeType y tamaño en bytes
+          WHEN sl.resource_type = 'file' THEN 
+            json_build_object(
+              'id', f.id, 
+              'name', f.name, 
+              'mime_type', f.mime_type, 
+              'size', f.size
+            )
+          -- Si es una carpeta: empaqueta id y nombre
+          WHEN sl.resource_type = 'folder' THEN 
+            json_build_object(
+              'id', fo.id, 
+              'name', fo.name
+            )
         END AS resource
+
       FROM share_links sl
-      LEFT JOIN files f ON sl.resource_type = "file" 
-        AND f.id = sl.resource_id 
-        AND f.is_trashed = false
-      LEFT JOIN folders pf ON f.folder_id = pf.id
-      LEFT JOIN folders fo ON sl.resource_type = "folder"
-        AND fo.id = sl.resource_id
-        AND fo.is_trashed = false
-      WHERE  sl.owner_id = ${req.user.id}
-      AND (
-        (sl.resource_type = "file" AND f.id IS NOT NULL AND (f.folder_id IS NULL OR pf.is_trashed = false))
-        OR 
-          (sl.resource_type = "folder" AND fo.id IS NOT NULL)
-      )
-      ORDER BY sl.created_at DESC
+
+      -- 1. Unir con la tabla 'files' solo si el enlace es de tipo 'file' y el archivo no está en papelera
+      LEFT JOIN files f 
+        ON sl.resource_type = 'file' 
+       AND f.id = sl.resource_id 
+       AND f.is_trashed = false
+
+      -- 2. Unir con la carpeta padre del archivo (pf = parent folder)
+      -- Sirve para verificar que la carpeta contenedora tampoco esté en la papelera
+      LEFT JOIN folders pf 
+        ON f.folder_id = pf.id
+
+      -- 3. Unir con la tabla 'folders' solo si el enlace es de tipo 'folder' y no está en papelera
+      LEFT JOIN folders fo 
+        ON sl.resource_type = 'folder' 
+       AND fo.id = sl.resource_id 
+       AND fo.is_trashed = false
+
+      -- Filtros de seguridad e integridad:
+      WHERE sl.owner_id = ${req.user.id} -- Solo enlaces del usuario autenticado
+        AND (
+          -- Condición para archivos:
+          -- El archivo debe existir (f.id IS NOT NULL) Y (estar en la raíz O su carpeta padre no estar en papelera)
+          (sl.resource_type = 'file' AND f.id IS NOT NULL AND (f.folder_id IS NULL OR pf.is_trashed = false))
+          OR 
+          -- Condición para carpetas:
+          -- La carpeta compartida debe existir y no estar en papelera (fo.id IS NOT NULL)
+          (sl.resource_type = 'folder' AND fo.id IS NOT NULL)
+        )
+      
+      ORDER BY sl.created_at DESC; -- Enlaces más recientes primero
     `;
+
     return res.status(200).json({ share_links: activeShareLinks });
   } catch (error) {
     return res.status(500).json({ error: error.message });
   }
-}
+};
 
 // Access shared item by token (public link for anyone)
 // GET /api/shares/access/:token
