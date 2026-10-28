@@ -1,4 +1,5 @@
 import { sql } from "../config/db.js";
+import { emptyTrashHierarchy } from "../services/storageService";
 
 // ============================================================================
 // Obtener todos los elementos en la papelera (archivos y carpetas)
@@ -29,6 +30,17 @@ export const getTrashItems = async (req, res) => {
 
     // Devolvemos ambos listados para que el frontend los organice en la vista de papelera
     return res.status(200).json({ files, folders });
+  } catch (error) {
+    return res.status(500).json({ error: error.message });
+  }
+};
+
+// Empty user trash (permanently delete all trashed items)
+// POST /api/trash/empty
+export const emptyTrash = async (req, res) => {
+  try {
+    await emptyTrashHierarchy(req.user.id);
+    return res.status(200).json({ message: "Trash emptied successfully" });
   } catch (error) {
     return res.status(500).json({ error: error.message });
   }
