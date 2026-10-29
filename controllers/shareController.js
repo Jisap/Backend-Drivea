@@ -164,52 +164,82 @@ export const getUserShareLinks = async (req, res) => {
   }
 };
 
-// Access shared item by token (public link for anyone)
+// ============================================================================
+// Acceder a un recurso compartido mediante su token público (sin autenticación)
 // GET /api/shares/access/:token
+// ============================================================================
+//           [ Recibe :token por URL ]
+//                      │
+//           1. Validar Enlace (Token) ──── (¿No existe?) ───► 404 Not Found
+//                      │
+//           2. Validar Expiración     ──── (¿Caducó?)   ───► 410 Gone
+//                      │
+//           3. Sumar contador de visitas (+1 access_count)
+//                      │
+//           4. Obtener datos del dueño (id, name, email)
+//                      │
+//       ┌──────────────┴──────────────┐
+//       ▼                             ▼
+//[ CASO A: Archivo ]          [ CASO B: Carpeta ]
+//  • ¿Está en papelera?          • ¿Está en papelera?
+//  • ¿Su carpeta padre está      • Buscar subcarpetas activas
+//    en papelera?                • Buscar archivos directos
+//  • Firmar URL S3               • Firmar URL S3 de cada archivo
+//  • Responder JSON              • Responder JSON con árbol
 export const accessShareLink = async (req, res) => {
   try {
     const { token } = req.params;
 
+    // 1. Buscar el enlace compartido asociado al token
     const [shareLink] = await sql`
       SELECT * FROM share_links WHERE token = ${token}
-    `
+    `;
 
     if (!shareLink) {
-      return res.status(500).json({ error: error.message });
+      return res.status(404).json({ error: "Share link not found or invalid." });
     }
 
-    // Check expiration
+    // 2. Comprobar si el enlace ha expirado (si tiene fecha límite configurada)
     if (shareLink.expires_at && new Date() > new Date(shareLink.expires_at)) {
-      return res.status(410).json({ error: "This share link has expired." })
+      return res.status(410).json({ error: "This share link has expired." }); // 410 Gone
     }
 
-    // Increment access count atomically
+    // 3. Registrar analítica: Incrementar el contador de visitas/accesos de forma atómica
     await sql`
-      UPDATE share_links SET access_count = access_count + 1 WHERE id = ${shareLink.id}
-    `
+      UPDATE share_links 
+      SET access_count = access_count + 1 
+      WHERE id = ${shareLink.id}
+    `;
 
-    // Fetch owner info
+    // 4. Obtener información básica y pública del propietario para mostrar en la vista
     const [owner] = await sql`
       SELECT id, name, email FROM users WHERE id = ${shareLink.owner_id}
-    `
+    `;
 
+    // ==========================================================================
+    // CASO A: El recurso compartido es un ARCHIVO INDIVIDUAL
+    // ==========================================================================
     if (shareLink.resource_type === "file") {
+      // A.1. Obtener el archivo y verificar que no esté en la papelera
       const [file] = await sql`
         SELECT * FROM files WHERE id = ${shareLink.resource_id}
       `;
       if (!file || file.is_trashed) {
-        return res.status(404).json({ error: "File no longer available" })
+        return res.status(404).json({ error: "File no longer available" });
       }
+
+      // A.2. Si el archivo está dentro de una carpeta, verificar que la carpeta no esté en papelera
       if (file.folder_id) {
         const [parentFolder] = await sql`
           SELECT is_trashed FROM folders WHERE id = ${file.folder_id}
-        `
+        `;
         if (!parentFolder || parentFolder.is_trashed) {
-          return res.status(404).json({ error: "File is no longer available" })
+          return res.status(404).json({ error: "File is no longer available" });
         }
       }
 
-      const downloadUrl = await getSignedFileUrl(file.s3_key)
+      // A.3. Generar URL firmada temporal de S3 para descarga/previsualización
+      const downloadUrl = await getSignedFileUrl(file.s3_key);
 
       return res.status(200).json({
         resource_type: "file",
@@ -217,33 +247,40 @@ export const accessShareLink = async (req, res) => {
         url: downloadUrl,
         permission: shareLink.permission,
         owner
-      })
+      });
     }
 
-    // Folder resource
+    // ==========================================================================
+    // CASO B: El recurso compartido es una CARPETA
+    // ==========================================================================
+    // B.1. Obtener la carpeta y verificar que no esté en la papelera
     const [folder] = await sql`
       SELECT * FROM folders WHERE id = ${shareLink.resource_id}
     `;
 
     if (!folder || folder.is_trashed) {
-      return res.status(404).json({ error: "Folder is no longer available." })
+      return res.status(404).json({ error: "Folder is no longer available." });
     }
 
+    // B.2. Obtener en paralelo:
+    //      - Subcarpetas directas activas (no en papelera)
+    //      - Archivos directos activos (no en papelera)
     const [subfolders, files] = await Promise.all([
       sql`
-        SELECT id, name, parent_id, created_at FROM folders WHERE parent_id = ${folder.id} AND is_trashed = false,
+        SELECT id, name, parent_id, created_at FROM folders WHERE parent_id = ${folder.id} AND is_trashed = false
       `,
       sql`
         SELECT * FROM files WHERE folder_id = ${folder.id} AND is_trashed = false
       `
     ]);
 
+    // B.3. Generar URLs firmadas de S3 para cada archivo encontrado en la carpeta
     const filesWithUrls = await Promise.all(
       files.map(async (f) => ({
         ...f,
         url: await getSignedFileUrl(f.s3_key)
       }))
-    )
+    );
 
     return res.status(200).json({
       resource_type: "folder",
@@ -252,11 +289,11 @@ export const accessShareLink = async (req, res) => {
       files: filesWithUrls,
       permission: shareLink.permission,
       owner
-    })
+    });
   } catch (error) {
-    return res.status(500).json({ error: error.message })
+    return res.status(500).json({ error: error.message });
   }
-}
+};
 
 // Revoke/delete share link
 // DELETE /api/shares/:id
