@@ -295,22 +295,30 @@ export const accessShareLink = async (req, res) => {
   }
 };
 
-// Revoke/delete share link
+// ============================================================================
+// Revocar / eliminar un enlace compartido
 // DELETE /api/shares/:id
+// ============================================================================
 export const deleteShareLink = async (req, res) => {
   try {
+    const { id } = req.params;
+
+    // 1. Eliminar el enlace de la base de datos asegurando que pertenezca al usuario autenticado
+    // Se usa 'RETURNING id' para comprobar si realmente se borró un registro
     const [shareLink] = await sql`
       DELETE FROM share_links
-      WHERE id = ${req.params.id} AND owner_id = ${req.user.id}
-      RETURNING id
-    `
+      WHERE id = ${id} AND owner_id = ${req.user.id}
+      RETURNING id;
+    `;
 
+    // 2. Si no retornó ningún id, el enlace no existe o el usuario no es el propietario
     if (!shareLink) {
-      return res.status(404).json({ error: "Share link not found" })
+      return res.status(404).json({ error: "Share link not found or unauthorized." });
     }
 
-    return res.status(200).json({ message: "Share link revoked successfully." })
+    // 3. Confirmar la revocación exitosa
+    return res.status(200).json({ message: "Share link revoked successfully." });
   } catch (error) {
-    return res.status(500).json({ error: error.message })
+    return res.status(500).json({ error: error.message });
   }
-}
+};
