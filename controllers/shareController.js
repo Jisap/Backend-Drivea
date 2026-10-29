@@ -1,6 +1,8 @@
 
 import { sql } from "../config/db.js";
 import crypto from "crypto";
+import { getSignedFileUrl } from "../utils/s3Helper.js";
+import { permission } from "process";
 
 // ============================================================================
 // Crear u obtener enlace público compartido (Share Link) para archivo o carpeta
@@ -165,7 +167,95 @@ export const getUserShareLinks = async (req, res) => {
 // Access shared item by token (public link for anyone)
 // GET /api/shares/access/:token
 export const accessShareLink = async (req, res) => {
+  try {
+    const { token } = req.params;
 
+    const [shareLink] = await sql`
+      SELECT * FROM share_links WHERE token = ${token}
+    `
+
+    if (!shareLink) {
+      return res.status(500).json({ error: error.message });
+    }
+
+    // Check expiration
+    if (shareLink.expires_at && new Date() > new Date(shareLink.expires_at)) {
+      return res.status(410).json({ error: "This share link has expired." })
+    }
+
+    // Increment access count atomically
+    await sql`
+      UPDATE share_links SET access_count = access_count + 1 WHERE id = ${shareLink.id}
+    `
+
+    // Fetch owner info
+    const [owner] = await sql`
+      SELECT id, name, email FROM users WHERE id = ${shareLink.owner_id}
+    `
+
+    if (shareLink.resource_type === "file") {
+      const [file] = await sql`
+        SELECT * FROM files WHERE id = ${shareLink.resource_id}
+      `;
+      if (!file || file.is_trashed) {
+        return res.status(404).json({ error: "File no longer available" })
+      }
+      if (file.folder_id) {
+        const [parentFolder] = await sql`
+          SELECT is_trashed FROM folders WHERE id = ${file.folder_id}
+        `
+        if (!parentFolder || parentFolder.is_trashed) {
+          return res.status(404).json({ error: "File is no longer available" })
+        }
+      }
+
+      const downloadUrl = await getSignedFileUrl(file.s3_key)
+
+      return res.status(200).json({
+        resource_type: "file",
+        file,
+        url: downloadUrl,
+        permission: shareLink.permission,
+        owner
+      })
+    }
+
+    // Folder resource
+    const [folder] = await sql`
+      SELECT * FROM folders WHERE id = ${shareLink.resource_id}
+    `;
+
+    if (!folder || folder.is_trashed) {
+      return res.status(404).json({ error: "Folder is no longer available." })
+    }
+
+    const [subfolders, files] = await Promise.all([
+      sql`
+        SELECT id, name, parent_id, created_at FROM folders WHERE parent_id = ${folder.id} AND is_trashed = false,
+      `,
+      sql`
+        SELECT * FROM files WHERE folder_id = ${folder.id} AND is_trashed = false
+      `
+    ]);
+
+    const filesWithUrls = await Promise.all(
+      files.map(async (f) => ({
+        ...f,
+        url: await getSignedFileUrl(f.s3_key)
+      }))
+    )
+
+    return res.status(200).json({
+      resource_type: "folder",
+      folder,
+      subfolders,
+      files: filesWithUrls,
+      permission: shareLink.permission,
+      owner
+    })
+  } catch (error) {
+    return res.status(500).json({ error: error.message })
+  }
 }
 
 // Revoke/delete share link
